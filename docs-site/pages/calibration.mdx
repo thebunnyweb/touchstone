@@ -1,0 +1,115 @@
+---
+title: Calibration
+description: Detect judge drift when LLM providers silently update their models
+---
+
+import { Callout, Steps } from 'nextra/components'
+
+# Calibration
+
+Model providers update models silently. A judge that scored 0.82 on your eval set three months ago may score 0.74 today — with no announced change. Calibration gives you an early warning system.
+
+---
+
+## The problem
+
+Your CI pipeline scores outputs against a threshold of 0.75. Everything passes. Then one day, 40% of previously passing outputs start failing. You trace it back to a quiet model update three weeks ago.
+
+This is a real pattern. touchstone's `Calibration` class lets you detect it before it reaches production.
+
+---
+
+## Setup
+
+<Steps>
+
+### Record a baseline
+
+Run once on a fixed set of reference samples. This stores the mean score per sample for the current model version.
+
+```python
+from touchstone import Judge, Calibration, FACTUALITY
+
+SAMPLES = [
+    "Water boils at 100°C at sea level.",
+    "The speed of light is approximately 299,792 km/s.",
+    "DNA is composed of four nucleotide bases.",
+]
+
+judge = Judge(model="claude-sonnet-4-6")
+cal = Calibration(judge, store=".touchstone/calibration.json")
+
+await cal.baseline(SAMPLES, rubric=FACTUALITY)
+# Baseline recorded for claude-sonnet-4-6: mean=0.921 over 3 samples.
+```
+
+### Re-check periodically
+
+Run this on a schedule (weekly, or before major releases):
+
+```python
+report = await cal.check(SAMPLES, rubric=FACTUALITY)
+
+print(report.drift_score)   # 0.02 = stable
+print(report.drifted)       # False
+print(report)
+# DriftReport(claude-sonnet-4-6 | stable ✓ | baseline=0.921 → current=0.903 | drift=0.018)
+```
+
+### Act on drift
+
+```python
+if report.drifted:
+    # drift_score > 0.05
+    alert("Judge scoring has shifted. Re-validate your eval thresholds.")
+```
+
+</Steps>
+
+---
+
+## Drift threshold
+
+The default drift threshold is `0.05` — a mean score shift of more than 5 percentage points triggers `drifted=True`.
+
+This is intentionally conservative. A 0.02 shift is normal run-to-run variation. A 0.08 shift likely means the model changed.
+
+---
+
+## Where to store the baseline
+
+The default store is `.touchstone/calibration.json` in your project root. Commit this file to version control so your team shares the same baseline.
+
+```bash
+# Add to git
+git add .touchstone/calibration.json
+git commit -m "Add judge calibration baseline"
+```
+
+<Callout type="warning">
+  If you upgrade your judge model intentionally (e.g., `claude-sonnet-4-6` → `claude-opus-4-7`), re-run `baseline()` for the new model. Calibration is per-model-id.
+</Callout>
+
+---
+
+## In CI
+
+Add a calibration check to your CI pipeline to catch drift automatically:
+
+```yaml
+# .github/workflows/eval.yml
+- name: Check judge calibration
+  run: python -c "
+import asyncio
+from touchstone import Judge, Calibration, FACTUALITY
+
+async def main():
+    judge = Judge(model='claude-sonnet-4-6')
+    cal = Calibration(judge)
+    report = await cal.check(SAMPLES, rubric=FACTUALITY)
+    if report.drifted:
+        raise SystemExit(f'Judge drift detected: {report.drift_score:.3f}')
+
+asyncio.run(main())
+"
+```

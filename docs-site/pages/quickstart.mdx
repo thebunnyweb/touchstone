@@ -1,0 +1,127 @@
+---
+title: Quickstart
+description: Score your first output in under 2 minutes
+---
+
+import { Callout, Steps, Tabs, Tab } from 'nextra/components'
+
+# Quickstart
+
+Score your first output in under 2 minutes.
+
+## Install
+
+<Tabs items={['Anthropic', 'OpenAI', 'All providers + CLI', 'Ollama (local)']}>
+  <Tab>
+    ```bash
+    pip install touchstone-llm[anthropic]
+    ```
+  </Tab>
+  <Tab>
+    ```bash
+    pip install touchstone-llm[openai]
+    ```
+  </Tab>
+  <Tab>
+    ```bash
+    pip install touchstone-llm[all]
+    ```
+  </Tab>
+  <Tab>
+    ```bash
+    pip install touchstone-llm[ollama]
+    ```
+  </Tab>
+</Tabs>
+
+## Score an output
+
+```python
+import asyncio
+from touchstone import Judge
+
+async def main():
+    judge = Judge(model="claude-sonnet-4-6")
+
+    result = await judge.score(
+        output="The Eiffel Tower is in Paris. It was built in 1889 for the World's Fair.",
+        rubric=["factual accuracy", "conciseness"],
+    )
+
+    print(result.adjusted_score)  # 0.93
+    print(result.bias_flags)      # []
+    print(result.reasoning)       # "Factually accurate, concise..."
+    print(result.passed)          # True (default threshold 0.7)
+
+asyncio.run(main())
+```
+
+<Callout type="info">
+  `adjusted_score` is the bias-corrected score. `score` is the raw judge output. Use `adjusted_score` in your logic.
+</Callout>
+
+## Use a weighted rubric
+
+```python
+from touchstone import Judge, Rubric
+
+rubric = (
+    Rubric()
+    .add("factual accuracy", description="All claims are correct", weight=0.6)
+    .add("conciseness", description="No unnecessary padding", weight=0.3)
+    .add("tone", description="Professional and clear", weight=0.1)
+)
+
+result = await judge.score(output, rubric=rubric)
+
+for cs in result.criteria_scores:
+    print(f"{cs.name}: {cs.score:.2f} — {cs.reasoning}")
+```
+
+## Compare two outputs
+
+```python
+result = await judge.compare(output_a, output_b, rubric=["helpfulness"])
+
+print(result.winner)                   # "a"
+print(result.confidence)               # 0.88
+print(result.position_bias_detected)  # False
+```
+
+## Run a panel
+
+```python
+from touchstone import Panel
+
+panel = Panel(models=["claude-sonnet-4-6", "gpt-4o"])
+result = await panel.evaluate(output, rubric=["accuracy", "clarity"])
+
+print(result.consensus_score)  # 0.86
+print(result.agreement)        # 0.91
+print(result.disputed)         # False
+```
+
+## CLI
+
+```bash
+# Score
+touchstone score "Paris is the capital of France." \
+  --criteria "factual accuracy" --threshold 0.8
+
+# Compare
+touchstone compare "Answer A text" "Answer B text" \
+  --criteria "helpfulness" --criteria "clarity"
+
+# Panel
+touchstone panel "Output text" \
+  --model claude-sonnet-4-6 --model gpt-4o \
+  --threshold 0.75
+
+# Exit code 1 if below threshold — use in CI
+```
+
+## Next steps
+
+- [Concepts](/concepts) — how Judge, Panel, Rubric, and Calibration work
+- [Bias Correction](/bias-correction) — understand what touchstone corrects for
+- [Panel Judging](/panel-judging) — multi-model consensus in depth

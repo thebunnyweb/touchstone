@@ -1,0 +1,74 @@
+---
+title: touchstone
+description: Bias-aware LLM judge with multi-model consensus and calibration drift detection
+---
+
+import { Callout, Cards, Card } from 'nextra/components'
+
+# touchstone
+
+**The LLM judge that corrects for its own biases.**
+
+```bash
+pip install touchstone-llm[anthropic]
+```
+
+```python
+from touchstone import Judge, HELPFULNESS
+
+judge = Judge(model="claude-sonnet-4-6")
+result = await judge.score(output, rubric=HELPFULNESS)
+
+print(result.adjusted_score)   # bias-corrected score
+print(result.bias_flags)       # ["verbosity"] if flagged
+print(result.passed)           # True / False vs threshold
+```
+
+---
+
+## Why touchstone?
+
+Every LLM eval framework runs a judge prompt and returns a score. Nobody corrects for what happens *before* that score reaches you.
+
+LLM judges carry three systematic biases that silently inflate or deflect scores:
+
+| Bias | What it does | How touchstone fixes it |
+|------|-------------|------------------------|
+| **Verbosity** | Longer outputs score higher regardless of quality | Length-normalized penalty applied automatically |
+| **Position** | In A/B comparisons, whichever answer comes first wins more often | Runs both orderings, reconciles with position-bias detection |
+| **Self-preference** | A model scores outputs from the same model family higher | Detected and flagged on every call |
+
+On top of that, **LLM judges drift**. Models get silently updated. touchstone lets you baseline a judge and alert when its scoring behavior shifts.
+
+---
+
+## Core features
+
+<Cards>
+  <Card title="Single judge" href="/concepts#judge" arrow>
+    Score any output against a composable rubric. Get raw + bias-corrected scores, per-criterion breakdown, and confidence.
+  </Card>
+  <Card title="Pairwise comparison" href="/concepts#comparison" arrow>
+    A vs B with automatic position-bias correction. Runs both orderings and tells you when the result is unreliable.
+  </Card>
+  <Card title="Panel judging" href="/panel-judging" arrow>
+    N models evaluated in parallel. Inter-judge agreement score. Disputed outputs flagged for human review.
+  </Card>
+  <Card title="Calibration drift" href="/calibration" arrow>
+    Baseline your judge. Re-check periodically. Get alerted when silent model updates shift scoring behavior.
+  </Card>
+</Cards>
+
+---
+
+## What touchstone is not
+
+touchstone is a **library primitive**, not a platform. It has no dashboard, no dataset storage, no tracing, no spans. If you want a full observability platform, use LangSmith. touchstone is what you call inside your evaluation logic.
+
+---
+
+## Next steps
+
+- [Quickstart](/quickstart) — score your first output in 2 minutes
+- [Concepts](/concepts) — understand Judge, Panel, Rubric, and Calibration
+- [Bias Correction](/bias-correction) — how the three bias corrections work

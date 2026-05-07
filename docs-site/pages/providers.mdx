@@ -1,0 +1,137 @@
+---
+title: Providers
+description: Configure Anthropic, OpenAI, Gemini, Ollama, and custom providers
+---
+
+import { Tabs, Tab, Callout } from 'nextra/components'
+
+# Providers
+
+touchstone is provider-agnostic. Pass a model string and it auto-routes, or pass a provider object for full control.
+
+---
+
+## Auto-routing
+
+When you pass a `model` string, touchstone infers the provider:
+
+| Model prefix | Provider |
+|-------------|---------|
+| `claude-*` | Anthropic |
+| `gpt-*`, `o1-*`, `o3-*`, `o4-*` | OpenAI |
+| `gemini-*` | Google (via OpenAI-compat endpoint) |
+| anything else | Ollama (local) |
+
+```python
+judge = Judge(model="claude-sonnet-4-6")   # → AnthropicProvider
+judge = Judge(model="gpt-4o")              # → OpenAIProvider
+judge = Judge(model="gemini-2.0-flash")    # → OpenAI-compat to Google
+judge = Judge(model="llama3")              # → OllamaProvider
+```
+
+---
+
+## Anthropic
+
+```bash
+pip install touchstone-llm[anthropic]
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```python
+from touchstone import Judge
+from touchstone.providers import AnthropicProvider
+
+# Auto-route
+judge = Judge(model="claude-sonnet-4-6")
+
+# Explicit
+provider = AnthropicProvider(model="claude-opus-4-7", api_key="sk-ant-...")
+judge = Judge(provider=provider)
+```
+
+---
+
+## OpenAI
+
+```bash
+pip install touchstone-llm[openai]
+export OPENAI_API_KEY=sk-...
+```
+
+```python
+from touchstone.providers import OpenAIProvider
+
+provider = OpenAIProvider(model="gpt-4o")
+judge = Judge(provider=provider)
+```
+
+---
+
+## Gemini
+
+Gemini is supported via the OpenAI-compatible endpoint. Set your API key as `GEMINI_API_KEY` or pass it explicitly:
+
+```bash
+pip install touchstone-llm[openai]
+export GEMINI_API_KEY=...
+```
+
+```python
+from touchstone.providers import OpenAIProvider
+
+provider = OpenAIProvider(
+    model="gemini-2.0-flash",
+    api_key="your-gemini-key",
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+)
+judge = Judge(provider=provider)
+```
+
+---
+
+## Ollama (local)
+
+Run models locally without any API key.
+
+```bash
+pip install touchstone-llm[ollama]
+# Make sure Ollama is running: ollama serve
+```
+
+```python
+from touchstone.providers import OllamaProvider
+
+provider = OllamaProvider(model="llama3", base_url="http://localhost:11434")
+judge = Judge(provider=provider)
+```
+
+---
+
+## Custom provider
+
+Implement `BaseProvider` to connect any LLM:
+
+```python
+from touchstone.providers import BaseProvider
+
+class MyProvider(BaseProvider):
+    @property
+    def model_id(self) -> str:
+        return "my-custom-model"
+
+    async def complete(
+        self,
+        messages: list[dict],
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+    ) -> str:
+        # call your LLM here
+        return response_text
+
+judge = Judge(provider=MyProvider())
+```
+
+<Callout type="info">
+  `complete()` must return a plain string. touchstone handles JSON parsing from the response.
+</Callout>

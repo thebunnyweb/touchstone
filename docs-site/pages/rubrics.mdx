@@ -1,0 +1,93 @@
+---
+title: Rubrics
+description: Building and composing evaluation rubrics
+---
+
+# Rubrics
+
+A `Rubric` defines what you're evaluating and how to weight each dimension. It's the contract between you and the judge.
+
+---
+
+## Building a rubric
+
+```python
+from touchstone import Rubric
+
+rubric = (
+    Rubric()
+    .add("factual accuracy", description="All claims are verifiable and correct", weight=0.5)
+    .add("conciseness",      description="No unnecessary padding or repetition",  weight=0.3)
+    .add("tone",             description="Professional, clear, and respectful",   weight=0.2)
+)
+```
+
+Weights are relative — they're normalized to percentages internally. `weight=2.0` and `weight=1.0` on two criteria means 67% / 33%.
+
+---
+
+## Shorthand
+
+Pass a plain list of strings for equal-weight criteria:
+
+```python
+result = await judge.score(output, rubric=["accuracy", "clarity", "tone"])
+```
+
+touchstone converts it to a `Rubric` with `weight=1.0` on each criterion.
+
+---
+
+## Built-in rubrics
+
+Import ready-made rubrics for common use cases:
+
+```python
+from touchstone import FACTUALITY, HELPFULNESS, SAFETY, RAG_QUALITY
+```
+
+| Rubric | Criteria |
+|--------|---------|
+| `FACTUALITY` | factual accuracy (100%) |
+| `HELPFULNESS` | relevance (40%), completeness (30%), clarity (30%) |
+| `SAFETY` | harmlessness (60%), appropriate tone (40%) |
+| `RAG_QUALITY` | groundedness (50%), relevance (30%), faithfulness (20%) |
+
+---
+
+## Composing rubrics
+
+You can merge rubrics by chaining `.add()` from an existing one, or build domain-specific variants:
+
+```python
+from touchstone import HELPFULNESS
+
+# Extend a built-in
+rag_helpfulness = Rubric()
+for c in HELPFULNESS.criteria:
+    rag_helpfulness.add(c.name, c.description, c.weight)
+rag_helpfulness.add("groundedness", "Claims are backed by retrieved context", weight=0.5)
+```
+
+---
+
+## How rubrics appear in the judge prompt
+
+touchstone converts your rubric into a structured section in the scoring prompt:
+
+```
+Evaluate against these weighted criteria (score each 0.0–1.0):
+  • factual accuracy (50% weight) — All claims are verifiable and correct
+  • conciseness (30% weight) — No unnecessary padding or repetition
+  • tone (20% weight) — Professional, clear, and respectful
+```
+
+The judge is asked to score each criterion individually, then touchstone uses the weighted mean of those scores to compute `score`. Verbosity adjustment is then applied to produce `adjusted_score`.
+
+---
+
+## Tips
+
+- **Be specific in descriptions.** "Good quality" gives the judge nothing. "Claims are supported by cited sources" is actionable.
+- **Weight reflects your priorities.** If factual accuracy is a hard requirement and tone is a nice-to-have, reflect that in weights.
+- **Don't add too many criteria.** 3–5 criteria is the sweet spot. More than 7 dilutes each one and degrades judge reliability.

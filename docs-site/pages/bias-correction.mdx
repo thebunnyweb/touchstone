@@ -1,0 +1,118 @@
+---
+title: Bias Correction
+description: How touchstone detects and corrects for verbosity, position, and self-preference bias
+---
+
+import { Callout } from 'nextra/components'
+
+# Bias Correction
+
+LLM judges are not neutral instruments. They carry measurable, systematic biases that inflate or deflect scores silently. touchstone corrects for three of them.
+
+---
+
+## Verbosity bias
+
+**What it is:** LLM judges consistently rate longer outputs higher, regardless of quality. A 400-word answer to a question that deserves 50 words will outscore the concise answer in head-to-head evals.
+
+**Why it happens:** LLMs are trained on human feedback where humans often equate length with effort. The judge has absorbed the same bias.
+
+**How touchstone corrects it:**
+
+When `output` exceeds 2.5× the baseline word count (default: 150 words), a soft penalty is applied:
+
+```
+penalty = min(0.08, (ratio - 2.5) × 0.004)
+adjusted_score = score - penalty
+```
+
+The flag `"verbosity"` is added to `result.bias_flags`.
+
+```python
+result = await judge.score(very_long_output, rubric=["helpfulness"])
+print(result.score)           # 0.83 (raw)
+print(result.adjusted_score)  # 0.78 (after verbosity adjustment)
+print(result.bias_flags)      # ["verbosity"]
+```
+
+<Callout type="info">
+  The penalty is intentionally soft (max 8%). touchstone flags the bias and nudges the score — it doesn't override the judge's judgment entirely.
+</Callout>
+
+---
+
+## Position bias
+
+**What it is:** In pairwise comparisons (A vs B), LLMs prefer whichever response appears first in the prompt. Research shows this creates a measurable first-position advantage, independent of quality.
+
+**Why it happens:** Attention patterns in transformer models decay with distance. The first response receives more "focus" during generation of the judgment.
+
+**How touchstone corrects it:**
+
+`Judge.compare()` always runs **two evaluations** — A vs B and B vs A — then reconciles:
+
+```python
+result = await judge.compare(output_a, output_b)
+print(result.winner)                  # "a" — consistent across both orderings
+print(result.position_bias_detected)  # False — both orderings agreed
+```
+
+If the two runs disagree (A wins forward, B wins reversed), `position_bias_detected=True` and `winner="tie"` with `confidence=0.5`:
+
+```python
+# When the judge is inconsistent
+print(result.winner)                  # "tie"
+print(result.position_bias_detected)  # True
+print(result.confidence)              # 0.5
+```
+
+**What to do when position bias is detected:** Your comparison is unreliable. Either accept the tie, use a `Panel` with multiple judges to get more signal, or redesign the evaluation to use absolute scoring instead of pairwise.
+
+---
+
+## Self-preference bias
+
+**What it is:** LLM judges rate outputs from the same model family higher than outputs from other families. Claude tends to prefer Claude-generated text. GPT-4 tends to prefer GPT-generated text.
+
+**Why it happens:** Models are trained on data that reflects their own outputs and preferences. Stylistic alignment creates unconscious favoritism.
+
+**How touchstone detects it:**
+
+Pass `evaluated_model` when creating a `Judge`:
+
+```python
+judge = Judge(
+    model="claude-sonnet-4-6",
+    evaluated_model="claude-opus-4-7",  # what generated the output
+)
+
+result = await judge.score(output)
+print(result.bias_flags)  # ["self_preference"]
+```
+
+<Callout type="warning">
+  touchstone **flags** self-preference but does not automatically adjust the score. The correction for this bias is to use a **cross-model panel** — judge Claude outputs with GPT and vice versa.
+</Callout>
+
+**Recommended pattern:**
+
+```python
+from touchstone import Panel
+
+# Use cross-family judges for more objective scoring
+panel = Panel(models=["gpt-4o", "gemini-2.0-flash"])  # evaluate Claude output
+result = await panel.evaluate(claude_output, rubric=rubric)
+```
+
+---
+
+## Reading bias flags
+
+Every `JudgeResult` has a `bias_flags: list[str]` field:
+
+| Flag | Meaning |
+|------|---------|
+| `"verbosity"` | Output was >2.5× baseline length; score was penalized |
+| `"self_preference"` | Judge and evaluated output are from the same model family |
+
+Position bias is reported on `ComparisonResult.position_bias_detected` (bool), not as a flag.

@@ -1,0 +1,126 @@
+---
+title: Panel Judging
+description: Multi-model consensus evaluation with inter-judge agreement scoring
+---
+
+import { Callout } from 'nextra/components'
+
+# Panel Judging
+
+A `Panel` runs your evaluation across multiple models in parallel and computes a consensus score with an inter-judge agreement metric.
+
+---
+
+## Why use a panel?
+
+A single judge is a single point of failure. Different models have different aesthetic preferences, training biases, and capability gaps. When one model scores an output 0.9 and another scores it 0.4, that disagreement carries important information:
+
+- The evaluation criteria may be ambiguous
+- The output may sit in an edge case one model handles poorly
+- One judge may have self-preference bias
+
+A panel surfaces this disagreement rather than hiding it.
+
+---
+
+## Basic usage
+
+```python
+from touchstone import Panel, HELPFULNESS
+
+panel = Panel(
+    models=["claude-sonnet-4-6", "gpt-4o"],
+    threshold=0.75,
+)
+
+result = await panel.evaluate(output, rubric=HELPFULNESS)
+
+print(result.consensus_score)   # 0.84
+print(result.agreement)         # 0.91  (high agreement)
+print(result.disputed)          # False
+print(result.passed)            # True  (0.84 >= 0.75)
+```
+
+---
+
+## Agreement score
+
+`result.agreement` is a normalized inter-judge agreement score from 0 to 1.
+
+It's computed as: `1 - (mean_absolute_deviation / 0.5)`
+
+Where `0.5` is the maximum possible MAD for scores in the `[0, 1]` range.
+
+| Agreement | Interpretation |
+|-----------|---------------|
+| `> 0.9` | Judges strongly agree |
+| `0.7 – 0.9` | Reasonable consensus |
+| `< 0.7` | **Disputed** — consider human review |
+
+When `agreement < dispute_threshold` (default `0.7`), `result.disputed = True` and the reasoning message flags it.
+
+---
+
+## Inspecting individual results
+
+```python
+for model, judge_result in result.individual_results.items():
+    print(f"{model}: {judge_result.adjusted_score:.3f}")
+    print(f"  bias flags: {judge_result.bias_flags}")
+    print(f"  reasoning:  {judge_result.reasoning}")
+```
+
+---
+
+## Using custom providers
+
+```python
+from touchstone import Panel
+from touchstone.providers import AnthropicProvider, OpenAIProvider
+
+panel = Panel(
+    providers=[
+        AnthropicProvider(model="claude-opus-4-7"),
+        OpenAIProvider(model="gpt-4o", api_key="sk-..."),
+    ]
+)
+```
+
+---
+
+## Handling disputes
+
+When `result.disputed` is `True`, the right next step depends on your use case:
+
+**For automated pipelines:** Treat disputed outputs as uncertain — don't auto-pass or auto-fail. Route to human review.
+
+**For eval development:** Disputed outputs reveal rubric ambiguity. Use them to sharpen your criteria definitions.
+
+**For production gates:** Use a stricter `dispute_threshold` (e.g., `0.8`) to catch more borderline cases.
+
+```python
+panel = Panel(
+    models=["claude-sonnet-4-6", "gpt-4o", "gemini-2.0-flash"],
+    dispute_threshold=0.8,  # flag more aggressively
+)
+```
+
+---
+
+## Cross-model judging for self-preference correction
+
+The most practical way to mitigate self-preference bias is to use judges from a different model family than the output you're evaluating:
+
+```python
+# Evaluating Claude output — use non-Claude judges
+panel = Panel(models=["gpt-4o", "gemini-2.0-flash"])
+result = await panel.evaluate(claude_generated_output)
+
+# Evaluating GPT output — use non-GPT judges
+panel = Panel(models=["claude-sonnet-4-6", "gemini-2.0-flash"])
+result = await panel.evaluate(gpt_generated_output)
+```
+
+<Callout type="tip">
+  Three judges is usually the sweet spot. Two judges can deadlock. Four or more adds latency without much additional signal.
+</Callout>

@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+.env
+.DS_Store
+*.log
+
+# Next.js
+docs-site/.next/
+docs-site/out/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+.eggs/
+
+# Calibration store (commit intentionally if sharing baselines)
+.touchstone/
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/

@@ -1,0 +1,139 @@
+---
+title: CI / CD
+description: Use touchstone as a quality gate in GitHub Actions
+---
+
+import { Callout } from 'nextra/components'
+
+# CI / CD
+
+touchstone's CLI exits with code `1` when outputs fail threshold, making it a drop-in quality gate in any CI pipeline.
+
+---
+
+## GitHub Actions
+
+```yaml
+# .github/workflows/eval.yml
+name: LLM Eval
+
+on: [push, pull_request]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install touchstone-llm[anthropic,cli]
+
+      - name: Score outputs
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          touchstone score \
+            "$(cat outputs/response.txt)" \
+            --criteria "factual accuracy" \
+            --criteria "helpfulness" \
+            --threshold 0.8
+
+      - name: Panel eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          touchstone panel \
+            "$(cat outputs/response.txt)" \
+            --model claude-sonnet-4-6 \
+            --model gpt-4o \
+            --threshold 0.75
+```
+
+---
+
+## Batch evaluation via Python
+
+For evaluating many outputs, use Python directly in CI:
+
+```python
+# eval/run_evals.py
+import asyncio, sys, json
+from pathlib import Path
+from touchstone import Judge, Rubric
+
+RUBRIC = (
+    Rubric()
+    .add("factual accuracy", weight=0.5)
+    .add("helpfulness",      weight=0.5)
+)
+
+async def main():
+    judge = Judge(model="claude-sonnet-4-6", threshold=0.75)
+    outputs = json.loads(Path("outputs.json").read_text())
+
+    failed = []
+    for item in outputs:
+        result = await judge.score(item["output"], rubric=RUBRIC)
+        if not result.passed:
+            failed.append({"id": item["id"], "score": result.adjusted_score})
+
+    if failed:
+        print(f"FAILED: {len(failed)} outputs below threshold")
+        for f in failed:
+            print(f"  {f['id']}: {f['score']:.3f}")
+        sys.exit(1)
+
+    print(f"All {len(outputs)} outputs passed.")
+
+asyncio.run(main())
+```
+
+```yaml
+- name: Run batch evals
+  run: python eval/run_evals.py
+```
+
+---
+
+## JSON output for downstream processing
+
+All CLI commands support `--json` for machine-readable output:
+
+```bash
+touchstone score "output text" --criteria "accuracy" --json
+# {"score": 0.91, "adjusted_score": 0.91, "bias_flags": [], "passed": true, ...}
+```
+
+Pipe to `jq` for scripting:
+
+```bash
+touchstone score "$(cat response.txt)" --criteria "accuracy" --json \
+  | jq '.passed'
+```
+
+---
+
+## Pre-commit hook
+
+Block commits when generated content fails eval:
+
+```bash
+# .git/hooks/pre-commit
+#!/bin/bash
+if [ -f generated_output.txt ]; then
+  touchstone score "$(cat generated_output.txt)" \
+    --criteria "accuracy" --threshold 0.7 --json > /dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    echo "❌ Generated output failed quality threshold. Review before committing."
+    exit 1
+  fi
+fi
+```
+
+<Callout type="tip">
+  Store your `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` as GitHub Actions secrets, never in the repo.
+</Callout>

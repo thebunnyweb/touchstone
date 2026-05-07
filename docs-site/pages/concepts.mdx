@@ -1,0 +1,128 @@
+---
+title: Concepts
+description: Core primitives in touchstone — Judge, Panel, Rubric, Calibration
+---
+
+import { Callout } from 'nextra/components'
+
+# Concepts
+
+touchstone has four primitives. Each does one thing well.
+
+---
+
+## Judge
+
+A `Judge` wraps a single LLM provider and adds bias detection on every call.
+
+```python
+from touchstone import Judge
+
+judge = Judge(model="claude-sonnet-4-6", threshold=0.7)
+result = await judge.score(output, rubric=["accuracy"])
+```
+
+**What Judge does on every `.score()` call:**
+1. Builds a calibrated scoring prompt with your rubric
+2. Calls the provider at `temperature=0` for deterministic output
+3. Parses structured JSON from the response
+4. Checks for self-preference bias (same model family as evaluated output)
+5. Applies verbosity normalization if output is unusually long
+6. Returns `JudgeResult` with both `score` and `adjusted_score`
+
+**Constructor parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `str` | `"claude-sonnet-4-6"` | Model string (auto-routes to provider) |
+| `provider` | `BaseProvider` | `None` | Use a custom provider instead of model string |
+| `threshold` | `float` | `0.7` | `result.passed` is `True` when `adjusted_score >= threshold` |
+| `evaluated_model` | `str` | `None` | Model that generated the output (for self-preference detection) |
+
+---
+
+## Comparison {#comparison}
+
+`Judge.compare()` runs a pairwise A/B evaluation with **position-bias correction**.
+
+```python
+result = await judge.compare(output_a, output_b, rubric=["helpfulness"])
+```
+
+Internally, it runs the comparison **twice** — once with A first, once with B first — and reconciles the results. If the two runs disagree about the winner, it flags `position_bias_detected=True` and returns `winner="tie"`.
+
+**Why this matters:** Studies show LLMs prefer whichever response appears first in a pairwise prompt by a significant margin. Without running both orderings, your comparison scores are unreliable.
+
+---
+
+## Panel
+
+A `Panel` runs the same evaluation across multiple models in parallel and computes inter-judge consensus.
+
+```python
+from touchstone import Panel
+
+panel = Panel(models=["claude-sonnet-4-6", "gpt-4o", "gemini-2.0-flash"])
+result = await panel.evaluate(output, rubric=["accuracy"])
+
+result.consensus_score   # mean adjusted score
+result.agreement         # 0-1, higher = more agreement
+result.disputed          # True when agreement < 0.7
+```
+
+**Agreement score** is computed as `1 - normalized_MAD` where MAD is the mean absolute deviation of scores from the panel mean. An agreement of `0.9` means judges are closely aligned. An agreement below `0.7` sets `disputed=True` and the reasoning message recommends human review.
+
+---
+
+## Rubric
+
+A `Rubric` defines what you're evaluating and how to weight each criterion.
+
+```python
+from touchstone import Rubric
+
+rubric = (
+    Rubric()
+    .add("factual accuracy", weight=0.5)
+    .add("conciseness",      weight=0.3)
+    .add("tone",             weight=0.2)
+)
+```
+
+You can also pass a plain list of strings — touchstone converts it to an equal-weight `Rubric` automatically:
+
+```python
+result = await judge.score(output, rubric=["accuracy", "clarity"])
+```
+
+**Built-in rubrics** are available as module-level constants:
+
+```python
+from touchstone import FACTUALITY, HELPFULNESS, SAFETY, RAG_QUALITY
+```
+
+---
+
+## Calibration
+
+A `Calibration` tracks whether a judge's scoring behavior has drifted over time.
+
+```python
+from touchstone import Calibration
+
+cal = Calibration(judge, store=".touchstone/calibration.json")
+
+# Run once — stores mean scores for each sample
+await cal.baseline(reference_samples, rubric=FACTUALITY)
+
+# Run periodically — compares against baseline
+report = await cal.check(reference_samples, rubric=FACTUALITY)
+print(report.drift_score)   # 0.02 = stable, > 0.05 = drifted
+print(report.drifted)       # False
+```
+
+**Why calibration matters:** Model providers update models silently. A Claude or GPT-4o that scores 0.82 on your eval set today may score 0.74 in three months with no announced change. Without a baseline, you won't notice until production metrics shift. Calibration gives you an early warning system.
+
+<Callout type="warning">
+  Calibration compares scores on the **same samples**. Use a fixed, versioned reference set — don't shuffle it between runs.
+</Callout>

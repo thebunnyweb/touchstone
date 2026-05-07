@@ -1,0 +1,163 @@
+---
+title: API Reference
+description: Complete API reference for touchstone
+---
+
+# API Reference
+
+---
+
+## Judge
+
+```python
+class Judge:
+    def __init__(
+        self,
+        model: str | None = "claude-sonnet-4-6",
+        provider: BaseProvider | None = None,
+        threshold: float = 0.7,
+        evaluated_model: str | None = None,
+    ): ...
+```
+
+### `.score(output, rubric)`
+
+```python
+async def score(
+    self,
+    output: str,
+    rubric: Rubric | list[str] | None = None,
+) -> JudgeResult
+```
+
+### `.compare(output_a, output_b, rubric)`
+
+```python
+async def compare(
+    self,
+    output_a: str,
+    output_b: str,
+    rubric: Rubric | list[str] | None = None,
+) -> ComparisonResult
+```
+
+---
+
+## Panel
+
+```python
+class Panel:
+    def __init__(
+        self,
+        models: list[str] | None = None,
+        providers: list[BaseProvider] | None = None,
+        threshold: float = 0.7,
+        dispute_threshold: float = 0.7,
+        evaluated_model: str | None = None,
+    ): ...
+```
+
+### `.evaluate(output, rubric)`
+
+```python
+async def evaluate(
+    self,
+    output: str,
+    rubric: Rubric | list[str] | None = None,
+) -> PanelResult
+```
+
+---
+
+## Rubric
+
+```python
+class Rubric:
+    def add(self, name: str, description: str = "", weight: float = 1.0) -> Rubric
+    @classmethod
+    def from_list(cls, criteria: list[str]) -> Rubric
+```
+
+---
+
+## Calibration
+
+```python
+class Calibration:
+    def __init__(self, judge: Judge, store: str | Path = ".touchstone/calibration.json"): ...
+
+    async def baseline(self, samples: list[str], rubric=None) -> None
+    async def check(self, samples: list[str], rubric=None) -> DriftReport
+```
+
+---
+
+## Models
+
+### `JudgeResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `score` | `float` | Raw judge score (0–1) |
+| `adjusted_score` | `float` | Bias-corrected score (0–1) |
+| `reasoning` | `str` | Judge's explanation |
+| `confidence` | `float` | Judge's self-reported confidence |
+| `criteria_scores` | `list[CriterionScore]` | Per-criterion breakdown |
+| `bias_flags` | `list[str]` | Detected biases (`"verbosity"`, `"self_preference"`) |
+| `passed` | `bool` | `adjusted_score >= threshold` |
+| `model` | `str` | Judge model ID |
+
+### `PanelResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `consensus_score` | `float` | Mean adjusted score across judges |
+| `agreement` | `float` | Inter-judge agreement (0–1) |
+| `disputed` | `bool` | `agreement < dispute_threshold` |
+| `individual_results` | `dict[str, JudgeResult]` | Per-model results |
+| `reasoning` | `str` | Summary with per-model scores |
+| `passed` | `bool` | `consensus_score >= threshold` |
+
+### `ComparisonResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `winner` | `str` | `"a"`, `"b"`, or `"tie"` |
+| `confidence` | `float` | Confidence in the winner |
+| `reasoning` | `str` | Explanation |
+| `score_a` | `float` | Score for output A |
+| `score_b` | `float` | Score for output B |
+| `position_bias_detected` | `bool` | True when orderings disagree |
+
+### `DriftReport`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model` | `str` | Judge model ID |
+| `baseline_mean` | `float` | Stored baseline mean score |
+| `current_mean` | `float` | Current run mean score |
+| `drift_score` | `float` | `abs(current_mean - baseline_mean)` |
+| `drifted` | `bool` | `drift_score > 0.05` |
+| `baseline_recorded_at` | `str` | ISO timestamp of baseline |
+| `checked_at` | `str` | ISO timestamp of this check |
+
+---
+
+## Built-in rubrics
+
+```python
+from touchstone import FACTUALITY, HELPFULNESS, SAFETY, RAG_QUALITY
+```
+
+---
+
+## Providers
+
+```python
+from touchstone.providers import (
+    BaseProvider,       # ABC — implement to add any LLM
+    AnthropicProvider,
+    OpenAIProvider,
+    OllamaProvider,
+)
+```

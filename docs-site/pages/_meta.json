@@ -1,0 +1,24 @@
+{
+  "index": "Introduction",
+  "quickstart": "Quickstart",
+  "concepts": "Concepts",
+  "-- Core": {
+    "type": "separator",
+    "title": "Core"
+  },
+  "bias-correction": "Bias Correction",
+  "panel-judging": "Panel Judging",
+  "calibration": "Calibration",
+  "rubrics": "Rubrics",
+  "-- Integrations": {
+    "type": "separator",
+    "title": "Integrations"
+  },
+  "providers": "Providers",
+  "ci-cd": "CI / CD",
+  "-- Reference": {
+    "type": "separator",
+    "title": "Reference"
+  },
+  "api-reference": "API Reference"
+}
